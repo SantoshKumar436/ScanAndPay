@@ -1,0 +1,1732 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QRPass — Interactive Android Simulator</title>
+    
+    <!-- Google Fonts: Roboto for clean native Android vibe, and Outfit for desktop panel branding -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS v3 via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- jsQR Library CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              androidBg: '#0D1117',
+              androidSurface: '#1C2333',
+              androidPrimary: '#F5A623', // Saffron
+              androidPrimaryMuted: '#3A2E1A',
+              androidBlue: '#3B82F6', // Secondary Blue
+              androidGreen: '#10B981', // Success/WhatsApp
+              androidCardBg: '#161C2A',
+            },
+            fontFamily: {
+              sans: ['Roboto', 'sans-serif'],
+              display: ['Outfit', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+
+    <style>
+      /* Ripple Effect styles */
+      .ripple {
+        position: absolute;
+        border-radius: 50%;
+        transform: scale(0);
+        animation: ripple-animation 0.6s linear;
+        background-color: rgba(255, 255, 255, 0.3);
+        pointer-events: none;
+      }
+      @keyframes ripple-animation {
+        to {
+          transform: scale(4);
+          opacity: 0;
+        }
+      }
+
+      /* ViewPager Slide Transitions */
+      .tab-container {
+        display: flex;
+        width: 300%;
+        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        height: 100%;
+      }
+      .tab-page {
+        width: 33.3333%;
+        flex-shrink: 0;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+
+      /* Viewfinder scanline animation */
+      @keyframes laser-scan {
+        0%, 100% { top: 0%; opacity: 0.3; }
+        50% { top: 100%; opacity: 1; }
+      }
+      .scan-line {
+        animation: laser-scan 2.5s ease-in-out infinite;
+      }
+
+      /* Pulse Ring for Calling screen */
+      @keyframes md-pulse {
+        0% { transform: scale(0.95); opacity: 0.5; }
+        50% { transform: scale(1.15); opacity: 0.25; }
+        100% { transform: scale(1.35); opacity: 0; }
+      }
+      .animate-md-pulse {
+        animation: md-pulse 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
+
+      /* Custom scrollbars inside simulated device */
+      .sim-scroll::-webkit-scrollbar {
+        width: 4px;
+      }
+      .sim-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .sim-scroll::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+      }
+
+      /* Slide-up sheet transition */
+      .sheet-transition {
+        transition: transform 0.35s cubic-bezier(0.15, 1, 0.3, 1), opacity 0.3s ease;
+      }
+
+      /* Hide native select arrows for a clean look */
+      .clean-select {
+        appearance: none;
+        background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+      }
+
+      /* Collapsing card animation */
+      .card-collapsing {
+        transition: max-height 0.3s ease-out, margin 0.3s ease-out, padding 0.3s ease-out, opacity 0.3s ease-out !important;
+        overflow: hidden !important;
+      }
+
+      /* Global tooltip classes for desktop */
+      .tooltip-box {
+        position: relative;
+      }
+      .tooltip-box::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 110%;
+        left: 50%;
+        transform: translateX(-50%) scale(0.9);
+        background: #1e293b;
+        color: #f8fafc;
+        border: 1px solid rgba(255,255,255,0.1);
+        padding: 6px 12px;
+        font-size: 11px;
+        border-radius: 8px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: all 0.15s ease-out;
+        z-index: 100;
+        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+      }
+      @media (min-width: 1024px) {
+        .tooltip-box:hover::after {
+          opacity: 1;
+          transform: translateX(-50%) scale(1);
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-[#0A0E17] text-[#F8F6F2] font-sans overflow-x-hidden select-none min-h-screen">
+
+    <!-- Interactive Desktop Page Layout -->
+    <div class="min-h-screen w-full grid grid-cols-1 lg:grid-cols-12">
+      
+      <!-- LEFT PANEL: Dynamic Developer Settings & Live Control Panel (Hidden on mobile for authentic app simulation) -->
+      <section class="lg:col-span-5 xl:col-span-4 bg-[#0F1420] border-r border-[#1C2538] p-8 flex flex-col justify-between overflow-y-auto hidden lg:flex">
+        <div class="space-y-6">
+          
+          <!-- Logo & Brand -->
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-gradient-to-tr from-[#F5A623] to-[#F5D123] text-[#0D1117] rounded-2xl flex items-center justify-center shadow-[0_4px_20px_rgba(245,166,35,0.25)]">
+              <i data-lucide="qr-code" class="w-7 h-7 stroke-[2.5]"></i>
+            </div>
+            <div>
+              <h1 class="font-display font-black text-2xl tracking-tight text-white leading-none">QR<span class="text-[#F5A623]">Pass</span></h1>
+              <p class="text-[10px] text-[#9EAFCE] uppercase tracking-widest font-black mt-1">Material Design 3 Console</p>
+            </div>
+          </div>
+
+          <!-- Description -->
+          <p class="text-xs text-[#9EAFCE] leading-relaxed">
+            QRPass is built specifically for elderly parents in India. It removes the stress of navigating banking apps or memorizing UPI PINs. They capture any shop's UPI QR code, long-press it in their gallery, and immediately trigger the direct family hotline.
+          </p>
+
+          <!-- Divider -->
+          <div class="h-px bg-white/5 w-full"></div>
+
+          <!-- Simulation Triggers Section -->
+          <div>
+            <h3 class="text-xs font-black uppercase text-white tracking-widest mb-3 flex items-center gap-2">
+              <i data-lucide="sparkles" class="w-4 h-4 text-[#F5A623]"></i>
+              Simulation Controls
+            </h3>
+            <div class="space-y-3">
+              
+              <!-- Simulated Shop UPI Generator -->
+              <div class="bg-[#151D2F] border border-white/5 rounded-2xl p-4 space-y-3">
+                <p class="text-[11px] font-bold text-[#F5A623] uppercase tracking-wider">Configure Shop UPI QR</p>
+                <div>
+                  <label class="block text-[9px] text-[#9EAFCE] uppercase tracking-wider mb-1">Shop/Merchant Name</label>
+                  <input id="dev-shop-name" type="text" value="Sharma Grocery Store" class="w-full bg-[#0D1117] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#F5A623]" />
+                </div>
+                <div>
+                  <label class="block text-[9px] text-[#9EAFCE] uppercase tracking-wider mb-1">Requested Amount (₹)</label>
+                  <input id="dev-shop-price" type="number" value="380" class="w-full bg-[#0D1117] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#F5A623]" />
+                </div>
+                <button onclick="updateSimulatorQR()" class="w-full py-2 bg-[#F5A623] hover:bg-[#E09512] text-[#0D1117] text-xs font-black uppercase rounded-xl transition-all shadow-[0_4px_15px_rgba(245,166,35,0.15)] active:scale-95">
+                  Update Viewfinder QR
+                </button>
+              </div>
+
+              <!-- Push Mock Notifications -->
+              <div class="bg-[#151D2F] border border-white/5 rounded-2xl p-4">
+                <p class="text-[11px] font-bold text-[#3B82F6] uppercase tracking-wider mb-2">Simulate System Alert</p>
+                <button onclick="triggerMockSystemNotification('System Update', 'Simulating remote security configuration broadcast...')" class="w-full py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-semibold rounded-xl transition-all active:scale-95">
+                  Send Push Notification Alert
+                </button>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Core App Merits Checklist -->
+          <div class="bg-[#151D2F]/50 border border-white/5 rounded-2xl p-4 space-y-2.5">
+            <h4 class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Active Simulator Features</h4>
+            <div class="text-[11px] text-[#9EAFCE] space-y-1.5">
+              <p class="flex items-start gap-2">
+                <span class="text-[#10B981] font-bold">✓</span>
+                <span>Dual direct calling (<code class="text-[#F5A623] font-mono">tel:</code>) & WhatsApp message dispatch (<code class="text-[#10B981] font-mono">wa.me</code>)</span>
+              </p>
+              <p class="flex items-start gap-2">
+                <span class="text-[#10B981] font-bold">✓</span>
+                <span>Fluid Android-native Swipe-To-Delete gesture on Contact cards</span>
+              </p>
+              <p class="flex items-start gap-2">
+                <span class="text-[#10B981] font-bold">✓</span>
+                <span>Material Design 3 Bottom Sheet with dynamic Choice Chips</span>
+              </p>
+              <p class="flex items-start gap-2">
+                <span class="text-[#10B981] font-bold">✓</span>
+                <span>Real-time local clock & system battery emulation</span>
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Dev Footer -->
+        <div class="text-left space-y-1 pt-6 border-t border-white/5">
+          <p class="text-[10px] font-bold text-white">QRPass Senior Connect Engine</p>
+          <p class="text-[9px] text-[#9EAFCE]">Simulating Android SDK v34 (Material 3). Crafted Offline-Safe.</p>
+        </div>
+      </section>
+
+      <!-- RIGHT PANEL: Authentic Simulated Android Viewport -->
+      <section class="col-span-1 lg:col-span-7 xl:col-span-8 flex items-center justify-center p-0 sm:p-6 lg:p-8 bg-[#0D1117] relative">
+        
+        <!-- Glowing background decoration for desktop -->
+        <div class="absolute w-[450px] h-[450px] rounded-full bg-[#F5A623]/5 blur-[120px] top-1/4 left-1/4 pointer-events-none hidden lg:block"></div>
+        <div class="absolute w-[450px] h-[450px] rounded-full bg-[#3B82F6]/5 blur-[120px] bottom-1/4 right-1/4 pointer-events-none hidden lg:block"></div>
+
+        <!-- Phone Container (Pixels-perfect frame on desktop, full-viewport on mobile) -->
+        <div class="relative w-full h-screen sm:h-[750px] sm:w-[365px] bg-[#0D1117] sm:rounded-[42px] sm:border-[10px] sm:border-[#2C3545] sm:shadow-[0_24px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden relative" id="android-device">
+          
+          <!-- Android StatusBar -->
+          <div class="h-12 bg-black/40 text-white flex items-center justify-between px-6 shrink-0 relative z-50">
+            <!-- Left: Time & Dynamic Badge -->
+            <div class="flex items-center gap-1.5">
+              <span id="android-clock" class="text-[12px] font-medium tracking-tight">10:45</span>
+              <div class="flex items-center gap-1 opacity-75">
+                <i data-lucide="check-check" class="w-3 h-3 text-[#10B981]"></i>
+                <i data-lucide="qr-code" class="w-2.5 h-2.5 text-[#F5A623]"></i>
+              </div>
+            </div>
+
+            <!-- Center: Android Camera Notch -->
+            <div class="absolute top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-black rounded-full border border-white/15 flex items-center justify-center hidden sm:flex">
+              <div class="w-1.5 h-1.5 bg-[#1C2538] rounded-full"></div>
+            </div>
+
+            <!-- Right: System Indicators -->
+            <div class="flex items-center gap-1.5 text-gray-300">
+              <!-- Signal strength lines -->
+              <div class="flex items-end gap-0.5 h-3">
+                <span class="w-[2px] h-1 bg-white rounded-full"></span>
+                <span class="w-[2px] h-1.5 bg-white rounded-full"></span>
+                <span class="w-[2px] h-2 bg-white rounded-full"></span>
+                <span class="w-[2px] h-2.5 bg-white rounded-full"></span>
+                <span class="w-[2px] h-3 bg-white rounded-full"></span>
+              </div>
+              <!-- Wifi Icon -->
+              <i data-lucide="wifi" class="w-3.5 h-3.5 stroke-[2.5]"></i>
+              <!-- Battery percentage -->
+              <span class="text-[10px] font-bold" id="battery-percentage">88%</span>
+              <i data-lucide="battery-charging" class="w-4 h-4 text-[#10B981]"></i>
+            </div>
+          </div>
+
+          <!-- SYSTEM NOTIFICATION POPUP (Slides down on events) -->
+          <div id="system-notification-banner" class="absolute top-12 left-3 right-3 bg-[#1C2333]/95 backdrop-blur-md border border-white/10 rounded-2xl p-3.5 shadow-2xl z-50 flex items-start gap-3 transform -translate-y-48 transition-transform duration-300 pointer-events-none">
+            <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#F5A623] to-[#F5D123] text-black flex items-center justify-center shrink-0">
+              <i data-lucide="qr-code" class="w-4 h-4 stroke-[2.5]"></i>
+            </div>
+            <div class="flex-1 text-left">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] font-black text-[#F5A623] uppercase tracking-wider">QRPass Core</span>
+                <span class="text-[9px] text-gray-400">Just now</span>
+              </div>
+              <h4 id="sys-notif-title" class="text-xs font-bold text-white mt-0.5">Notification Header</h4>
+              <p id="sys-notif-body" class="text-[10px] text-gray-300 mt-0.5 leading-relaxed">Detailed info body text goes here.</p>
+            </div>
+          </div>
+
+          <!-- MAIN PAGES ROUTER CONTAINER -->
+          <div class="flex-1 overflow-hidden relative">
+            <div class="tab-container" id="tab-container">
+              
+              <!-- ==================== PAGE 1: HOME (SCAN) ==================== -->
+              <div class="tab-page flex flex-col justify-between p-5 text-center relative" id="page-home">
+                
+                <!-- Headline & Header Info -->
+                <div class="text-left pt-2">
+                  <h2 class="text-lg font-black text-white leading-tight">Secure Scan</h2>
+                  <p class="text-[10px] text-[#9EAFCE] font-medium uppercase tracking-wider mt-0.5">Immediate Payment Dispatch</p>
+                </div>
+
+                <!-- Viewfinder Section (Camera or High-fidelity CSS simulator) -->
+                <div class="my-3 flex-1 flex flex-col justify-center">
+                  <div class="relative aspect-square w-full max-w-[280px] mx-auto bg-black rounded-3xl overflow-hidden border border-white/5 shadow-2xl group">
+                    
+                    <!-- HTML5 Live Video stream (if allowed) -->
+                    <video id="viewfinder-video" autoplay playsinline muted class="w-full h-full object-cover hidden"></video>
+
+                    <!-- Viewfinder Overlay Canvas for QR Box -->
+                    <canvas id="viewfinder-overlay" class="absolute inset-0 w-full h-full object-cover pointer-events-none z-10 hidden"></canvas>
+
+                    <!-- Resume Scan Button Overlay -->
+                    <button id="resume-scan-btn" onclick="resumeScanning()" class="absolute inset-0 m-auto w-fit h-fit px-4 py-2.5 bg-[#F5A623] hover:bg-[#E09512] text-[#0D1117] text-xs font-black uppercase rounded-full shadow-lg transition-all active:scale-95 z-30 hidden flex items-center gap-1.5">
+                      <i data-lucide="scan" class="w-4 h-4"></i>
+                      <span>Scan Again</span>
+                    </button>
+
+                    <!-- Dynamic CSS Viewfinder Placeholder -->
+                    <div id="camera-placeholder" class="absolute inset-0 flex flex-col items-center justify-center p-6 bg-[#0E1524]">
+                      <!-- Ambient tech background grid -->
+                      <div class="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-25"></div>
+                      
+                      <!-- Simulated QR Graphic -->
+                      <div class="w-32 h-32 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center p-4 relative shadow-inner">
+                        <!-- Dynamic generated display info of shop -->
+                        <div class="w-full h-full text-white/10 relative">
+                          <i data-lucide="qr-code" class="w-full h-full stroke-[1]"></i>
+                        </div>
+                        <!-- Saffron Center QR Pass badge -->
+                        <div class="absolute inset-0 m-auto w-10 h-10 bg-[#0D1117] rounded-xl flex items-center justify-center border border-[#F5A623]">
+                          <i data-lucide="check" class="w-5 h-5 text-[#F5A623] stroke-[3]"></i>
+                        </div>
+                      </div>
+
+                      <span class="text-[11px] font-black text-[#F5A623] uppercase tracking-widest mt-4 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-[#F5A623] animate-ping"></span>
+                        Simulated Scan Active
+                      </span>
+                    </div>
+
+                    <!-- Scan Overlay laser line -->
+                    <div class="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#F5A623] to-transparent scan-line shadow-[0_0_15px_#F5A623] z-20"></div>
+
+                    <!-- Viewfinder target brackets -->
+                    <div class="absolute top-5 left-5 w-6 h-6 border-t-4 border-l-4 border-[#F5A623] rounded-tl-lg z-20"></div>
+                    <div class="absolute top-5 right-5 w-6 h-6 border-t-4 border-r-4 border-[#F5A623] rounded-tr-lg z-20"></div>
+                    <div class="absolute bottom-5 left-5 w-6 h-6 border-b-4 border-l-4 border-[#F5A623] rounded-bl-lg z-20"></div>
+                    <div class="absolute bottom-5 right-5 w-6 h-6 border-b-4 border-r-4 border-[#F5A623] rounded-br-lg z-20"></div>
+
+                    <!-- Live Shop Data Badge inside viewfinder -->
+                    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[#0D1117]/90 backdrop-blur-md px-3.5 py-2 rounded-full border border-white/10 flex items-center gap-2 z-20 min-w-[200px]">
+                      <div class="w-2.5 h-2.5 rounded-full bg-[#10B981] animate-pulse"></div>
+                      <div class="text-left flex-1 min-w-0">
+                        <p class="text-[9px] font-black text-white uppercase tracking-wider leading-none truncate" id="viewfinder-shop-name">Sharma Grocery Store</p>
+                        <p class="text-[11px] font-bold text-[#F5A623] mt-0.5 leading-none" id="viewfinder-shop-price">₹380.00</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Upload QR Photo Button and Status Message Box -->
+                  <div class="mt-2.5 flex flex-col items-center gap-2 select-none shrink-0">
+                    <button onclick="document.getElementById('qr-file-input').click()" class="py-2.5 px-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[11px] font-bold text-white flex items-center gap-2 transition-all active:scale-95 shadow-md">
+                      <i data-lucide="image" class="w-4.5 h-4.5 text-[#F5A623]"></i>
+                      <span>Upload QR Photo</span>
+                    </button>
+                    <input type="file" id="qr-file-input" accept="image/*" class="hidden" onchange="handleQRFileUpload(this)" />
+                    
+                    <canvas id="qr-canvas" class="hidden"></canvas>
+                  </div>
+
+                  <!-- QR Scan Status and Feedback Box -->
+                  <div id="scan-status-container" class="mt-2.5 p-3.5 bg-[#1C2333]/50 border border-white/5 rounded-2xl text-center hidden min-h-[64px] flex flex-col justify-center items-center">
+                    <span id="scan-status-badge" class="inline-flex items-center px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider mb-1 bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/30">
+                      QR Detected
+                    </span>
+                    <p id="scan-status-text" class="text-xs text-[#9EAFCE] font-medium leading-relaxed"></p>
+                  </div>
+
+                  <p class="text-[11px] text-[#9EAFCE] mt-2.5 max-w-[260px] mx-auto leading-relaxed shrink-0">
+                    Point camera at any shopkeeper's UPI QR code, or pick a photo from gallery.
+                  </p>
+                </div>
+
+                <!-- Recent Quick Family Share circle list -->
+                <div class="text-left shrink-0">
+                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Quick Family Share</p>
+                  
+                  <div class="flex gap-4 items-center overflow-x-auto pb-1.5 sim-scroll" id="home-recent-contacts">
+                    <!-- Populated dynamically with circular avatars. Tapping triggers bottom sheet action picker -->
+                  </div>
+                </div>
+
+              </div>
+
+
+              <!-- ==================== PAGE 2: CONTACTS (DYNAMIC ADD & SWIPE) ==================== -->
+              <div class="tab-page flex flex-col justify-between p-5 relative" id="page-contacts">
+                
+                <!-- Contacts Page Header -->
+                <div class="text-left pt-2 shrink-0 flex items-center justify-between">
+                  <div>
+                    <h2 class="text-lg font-black text-white leading-tight">My Family Circle</h2>
+                    <p class="text-[10px] text-[#9EAFCE] font-medium uppercase tracking-wider mt-0.5">Slide Left to Delete</p>
+                  </div>
+                  <!-- Soft warning counter badge -->
+                  <div class="px-2.5 py-1 rounded-full bg-[#1C2333] border border-white/5 flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-[#F5A623]" id="contacts-status-dot"></span>
+                    <span class="text-[10px] text-gray-300 font-bold" id="contacts-badge-counter">2/6</span>
+                  </div>
+                </div>
+
+                <!-- Contacts Scroll Arena -->
+                <div class="flex-1 my-4 overflow-y-auto pr-1 space-y-3 sim-scroll" id="contacts-list-container">
+                  <!-- Dynamic contacts slide-in cards with Swipe-to-delete system -->
+                </div>
+
+                <!-- Contacts Footer disclaimer / FAB is absolute positioned -->
+                <p class="text-[10px] text-[#9EAFCE]/65 leading-tight text-center shrink-0">
+                  * Limit to maximum 6 family members to keep the app ultra-simple and distraction-free for parents.
+                </p>
+
+                <!-- Android FAB Button in Bottom Right -->
+                <button onclick="openAddContactSheet()" class="absolute bottom-4 right-4 w-14 h-14 bg-[#F5A623] hover:bg-[#E09512] text-[#0D1117] rounded-3xl flex items-center justify-center shadow-[0_6px_20px_rgba(245,166,35,0.4)] active:scale-95 transition-transform duration-100 z-30 ripple-effect" id="contacts-fab">
+                  <i data-lucide="plus" class="w-7 h-7 stroke-[2.5]"></i>
+                </button>
+
+              </div>
+
+
+              <!-- ==================== PAGE 3: HISTORY ==================== -->
+              <div class="tab-page flex flex-col justify-between p-5" id="page-history">
+                
+                <!-- History Page Header -->
+                <div class="text-left pt-2 shrink-0 flex items-center justify-between border-b border-white/5 pb-3.5">
+                  <div>
+                    <h2 class="text-lg font-black text-white leading-tight">Activity Log</h2>
+                    <p class="text-[10px] text-[#9EAFCE] font-medium uppercase tracking-wider mt-0.5">Real-time payment traces</p>
+                  </div>
+                  <button onclick="clearHistoryLogs()" class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-[10px] font-bold transition-colors">
+                    Clear Logs
+                  </button>
+                </div>
+
+                <!-- History items timeline -->
+                <div class="flex-1 my-4 overflow-y-auto pr-1 space-y-3 sim-scroll" id="history-logs-container">
+                  <!-- Chronological active logs -->
+                </div>
+
+                <!-- History bottom disclaimer -->
+                <div class="bg-[#1C2333]/50 border border-white/5 rounded-2xl p-3.5 text-left shrink-0">
+                  <div class="flex items-center gap-2 mb-1">
+                    <i data-lucide="shield-check" class="w-4 h-4 text-[#10B981]"></i>
+                    <p class="text-[11px] font-bold text-white">Security Guarantee</p>
+                  </div>
+                  <p class="text-[10px] text-[#9EAFCE] leading-relaxed">
+                    QRPass only shares QR photos and initiates outbound hotline calls. We never access bank balances or credentials.
+                  </p>
+                </div>
+
+              </div>
+
+            </div>
+          </div>
+
+          <!-- ==================== MATERIAL DESIGN 3 BOTTOM SHEET: ADD CONTACT ==================== -->
+          <div id="add-contact-sheet" class="absolute inset-x-0 bottom-0 bg-[#1C2333] rounded-t-[2.2rem] border-t border-white/10 shadow-[0_-15px_40px_rgba(0,0,0,0.7)] z-50 transform translate-y-full opacity-0 pointer-events-none sheet-transition flex flex-col max-h-[90%]">
+            
+            <!-- Drag Handle Bar -->
+            <div class="py-3 flex justify-center shrink-0" onclick="closeAddContactSheet()">
+              <div class="w-12 h-1.5 bg-white/20 rounded-full cursor-pointer hover:bg-white/30 transition-colors"></div>
+            </div>
+
+            <!-- Scrollable content inside Bottom Sheet -->
+            <div class="px-6 pb-6 overflow-y-auto space-y-5 text-left flex-1 sim-scroll">
+              
+              <div class="text-left">
+                <h3 class="text-base font-black text-white">Add Family Member</h3>
+                <p class="text-[11px] text-[#9EAFCE]">This adds a quick direct-action target for the parents.</p>
+              </div>
+
+              <!-- Limit soft warning banner -->
+              <div id="contact-limit-warning" class="hidden p-3 bg-red-900/30 border border-red-500/20 text-red-200 text-[11px] rounded-xl flex items-start gap-2 animate-pulse">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-red-400 shrink-0 mt-0.5"></i>
+                <span>Family circle full (Max 6 contacts allowed). Please remove an existing member before adding Ramesh.</span>
+              </div>
+
+              <!-- Form Inputs -->
+              <form id="add-contact-form" onsubmit="handleSaveContact(event)" class="space-y-4">
+                
+                <!-- Full Name -->
+                <div>
+                  <label class="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Full Name</label>
+                  <input id="form-contact-name" type="text" placeholder="e.g. Rohit Kumar" required class="w-full bg-[#0D1117] border border-white/10 rounded-2xl px-4 py-3.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[#F5A623] focus:border-transparent transition-all" />
+                </div>
+
+                <!-- Relation Choice Chips -->
+                <div>
+                  <label class="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Relationship</label>
+                  <div class="grid grid-cols-3 gap-2" id="relation-chips-group">
+                    <button type="button" onclick="selectRelationChip('Son')" class="relation-chip py-2 bg-[#0D1117] border border-[#F5A623] text-[#F5A623] text-[10px] font-bold rounded-xl text-center active:scale-95 transition-all">Son</button>
+                    <button type="button" onclick="selectRelationChip('Daughter')" class="relation-chip py-2 bg-[#0D1117] border border-white/5 text-gray-400 text-[10px] font-bold rounded-xl text-center active:scale-95 transition-all">Daughter</button>
+                    <button type="button" onclick="selectRelationChip('Grandchild')" class="relation-chip py-2 bg-[#0D1117] border border-white/5 text-gray-400 text-[10px] font-bold rounded-xl text-center active:scale-95 transition-all">Grandchild</button>
+                    <button type="button" onclick="selectRelationChip('Son-in-law')" class="relation-chip py-2 bg-[#0D1117] border border-white/5 text-gray-400 text-[10px] font-bold rounded-xl text-center active:scale-95 transition-all">Son-in-law</button>
+                    <button type="button" onclick="selectRelationChip('Daughter-in-law')" class="relation-chip py-2 bg-[#0D1117] border border-white/5 text-gray-400 text-[10px] font-bold rounded-xl text-center active:scale-95 transition-all">Daughter-in-law</button>
+                    <button type="button" onclick="selectRelationChip('Spouse')" class="relation-chip py-2 bg-[#0D1117] border border-white/5 text-gray-400 text-[10px] font-bold rounded-xl text-center active:scale-95 transition-all">Spouse</button>
+                  </div>
+                  <input type="hidden" id="form-contact-relation" value="Son" />
+                </div>
+
+                <!-- Phone number with Visual +91 country prefix -->
+                <div>
+                  <label class="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">WhatsApp Mobile Number</label>
+                  <div class="relative flex">
+                    <div class="absolute left-0 inset-y-0 flex items-center pl-4 pr-2 border-r border-white/5 bg-[#0D1117] rounded-l-2xl text-xs font-bold text-[#F5A623]">
+                      +91
+                    </div>
+                    <input id="form-contact-phone" type="tel" placeholder="9876543210" required class="w-full bg-[#0D1117] border border-white/10 rounded-2xl pl-[68px] pr-4 py-3.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[#F5A623] focus:border-transparent transition-all" />
+                  </div>
+                  <p class="text-[9px] text-gray-500 mt-1.5">Enter the 10-digit mobile number. We format it automatically.</p>
+                </div>
+
+                <!-- Action Button -->
+                <div class="pt-2">
+                  <button type="submit" class="w-full py-4 bg-[#F5A623] hover:bg-[#E09512] text-[#0D1117] text-xs font-black uppercase rounded-2xl tracking-wider transition-all active:scale-95 flex items-center justify-center gap-1">
+                    <i data-lucide="user-plus" class="w-4 h-4"></i>
+                    <span>Save New Contact</span>
+                  </button>
+                </div>
+
+              </form>
+            </div>
+          </div>
+
+
+          <!-- ==================== MATERIAL DESIGN 3 BOTTOM SHEET: PARENT ACTION PANEL ==================== -->
+          <div id="parent-action-sheet" class="absolute inset-x-0 bottom-0 bg-[#1C2333] rounded-t-[2.2rem] border-t border-white/10 shadow-[0_-15px_40px_rgba(0,0,0,0.7)] z-50 transform translate-y-full opacity-0 pointer-events-none sheet-transition">
+            
+            <!-- Drag Handle Bar -->
+            <div class="py-3 flex justify-center shrink-0" onclick="closeParentActionSheet()">
+              <div class="w-12 h-1.5 bg-white/20 rounded-full cursor-pointer hover:bg-white/30 transition-colors"></div>
+            </div>
+
+            <!-- Content Area -->
+            <div class="px-6 pb-6 text-left space-y-4">
+              
+              <!-- Contact Overview Header -->
+              <div class="flex items-center gap-3 bg-black/20 p-3 rounded-2xl border border-white/5">
+                <div id="action-sheet-avatar" class="w-12 h-12 rounded-full text-white font-black flex items-center justify-center text-lg uppercase">
+                  A
+                </div>
+                <div>
+                  <h4 id="action-sheet-name" class="text-sm font-black text-white">Arjun</h4>
+                  <p id="action-sheet-relation" class="text-[10px] text-gray-400 mt-0.5">Son • +91 9876543210</p>
+                </div>
+              </div>
+
+              <!-- Shop payment details preview -->
+              <div class="bg-[#151D2F] border border-white/10 rounded-2xl p-4">
+                <p class="text-[9px] font-black text-[#F5A623] uppercase tracking-wider mb-2">Active UPI Scan Request</p>
+                <div class="flex items-center justify-between">
+                  <div class="text-left">
+                    <p class="text-xs font-bold text-white" id="action-preview-shop">Sharma Grocery Store</p>
+                    <p class="text-[10px] text-gray-400">Captured via parent camera</p>
+                  </div>
+                  <p class="text-sm font-black text-[#F5A623]" id="action-preview-price">₹380.00</p>
+                </div>
+              </div>
+
+              <!-- Two Big Direct Outbound Buttons -->
+              <div class="grid grid-cols-2 gap-3 pt-2">
+                
+                <!-- Green WhatsApp -->
+                <button id="action-whatsapp-btn" class="py-4 rounded-2xl bg-[#10B981] hover:bg-emerald-600 text-white font-black text-xs uppercase flex flex-col items-center justify-center gap-1.5 shadow-lg active:scale-95 transition-all">
+                  <i data-lucide="message-square" class="w-6 h-6 stroke-[2.5]"></i>
+                  <span>Send QR (WhatsApp)</span>
+                </button>
+
+                <!-- Blue Native Call -->
+                <button id="action-call-btn" class="py-4 rounded-2xl bg-[#3B82F6] hover:bg-blue-600 text-white font-black text-xs uppercase flex flex-col items-center justify-center gap-1.5 shadow-lg active:scale-95 transition-all">
+                  <i data-lucide="phone" class="w-6 h-6 stroke-[2.5]"></i>
+                  <span>Call Family</span>
+                </button>
+
+              </div>
+
+              <p class="text-[9px] text-[#9EAFCE] text-center leading-relaxed max-w-[260px] mx-auto pt-1">
+                Zero steps for parents! Send QR opens pre-filled WhatsApp, Call triggers native device dialler.
+              </p>
+            </div>
+          </div>
+
+
+          <!-- ==================== IMMERSIVE FULL-SCREEN CALL SCREEN (Triggered on native call) ==================== -->
+          <div id="immersive-call-screen" class="absolute inset-0 bg-[#0A0E17] flex flex-col justify-between p-6 z-[60] transform scale-110 opacity-0 pointer-events-none transition-all duration-300 text-center">
+            
+            <div class="pt-8">
+              <span class="text-[9px] font-black text-[#10B981] bg-[#10B981]/10 px-3 py-1 rounded-full uppercase tracking-wider border border-[#10B981]/15">
+                Simulating Android Dialer
+              </span>
+              <h4 id="call-screen-name" class="text-xl font-black font-display text-white mt-5">Arjun</h4>
+              <p id="call-screen-relation" class="text-xs text-gray-400 font-medium">Son • +91 9876543210</p>
+              <p id="call-screen-timer" class="text-xs font-mono font-black text-[#10B981] mt-3 tracking-widest">00:00</p>
+            </div>
+
+            <!-- Pulse Rings Avatar wrapper -->
+            <div class="flex justify-center relative my-6">
+              <div class="relative">
+                <div class="absolute -inset-4 rounded-full border border-[#10B981]/30 animate-md-pulse pointer-events-none"></div>
+                <div class="absolute -inset-10 rounded-full border border-[#10B981]/10 animate-md-pulse pointer-events-none" style="animation-delay: 0.5s"></div>
+                
+                <div id="call-screen-avatar" class="w-24 h-24 rounded-full bg-gradient-to-tr from-[#F5A623] to-[#F5D123] border-4 border-[#10B981] flex items-center justify-center text-black font-black text-3xl relative z-10 uppercase">
+                  A
+                </div>
+              </div>
+            </div>
+
+            <!-- Toggle icons row & Hangup button -->
+            <div class="space-y-6 shrink-0">
+              <div class="flex justify-center gap-6">
+                <!-- Toggle Mute -->
+                <button onclick="toggleCallMute()" id="call-mute-btn" class="w-12 h-12 rounded-full bg-white/5 border border-white/10 text-white flex items-center justify-center hover:bg-white/10 transition-colors focus:outline-none">
+                  <i id="call-mute-icon" data-lucide="mic" class="w-4.5 h-4.5"></i>
+                </button>
+
+                <!-- Toggle Speaker -->
+                <button onclick="toggleCallSpeaker()" id="call-speaker-btn" class="w-12 h-12 rounded-full bg-white/5 border border-white/10 text-white flex items-center justify-center hover:bg-white/10 transition-colors focus:outline-none">
+                  <i id="call-speaker-icon" data-lucide="volume-2" class="w-4.5 h-4.5"></i>
+                </button>
+              </div>
+
+              <!-- MD3 Hang Up Action Button -->
+              <button onclick="hangUpCall()" class="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-extrabold rounded-2xl transition-all flex items-center justify-center gap-2 shadow-xl shadow-red-900/40 active:scale-95">
+                <i data-lucide="phone-off" class="w-4.5 h-4.5"></i>
+                <span>Hang Up & Close</span>
+              </button>
+            </div>
+
+            <div class="text-[9px] text-gray-500 font-medium">
+              Device dialler fallback triggered: opens <code class="text-[#F5A623] font-mono">tel:</code> outbound
+            </div>
+          </div>
+
+
+          <!-- ==================== MATERIAL DESIGN 3 BOTTOM NAVIGATION BAR ==================== -->
+          <nav class="h-20 bg-[#161C2A] border-t border-white/5 flex items-center justify-around shrink-0 relative z-40 px-3">
+            
+            <!-- Tab 1: Home (Scan) -->
+            <button onclick="switchTab(0)" class="flex flex-col items-center gap-1 focus:outline-none flex-1 group" id="nav-tab-0">
+              <div class="relative py-1 px-5 rounded-full transition-all duration-300" id="nav-pill-0">
+                <i data-lucide="qr-code" class="w-5.5 h-5.5 transition-colors" id="nav-icon-0"></i>
+              </div>
+              <span class="text-[10px] font-bold tracking-wide transition-colors" id="nav-label-0">Scan</span>
+            </button>
+
+            <!-- Tab 2: Contacts -->
+            <button onclick="switchTab(1)" class="flex flex-col items-center gap-1 focus:outline-none flex-1 group" id="nav-tab-1">
+              <div class="relative py-1 px-5 rounded-full transition-all duration-300" id="nav-pill-1">
+                <i data-lucide="users" class="w-5.5 h-5.5 transition-colors" id="nav-icon-1"></i>
+              </div>
+              <span class="text-[10px] font-bold tracking-wide transition-colors" id="nav-label-1">Contacts</span>
+            </button>
+
+            <!-- Tab 3: History -->
+            <button onclick="switchTab(2)" class="flex flex-col items-center gap-1 focus:outline-none flex-1 group" id="nav-tab-2">
+              <div class="relative py-1 px-5 rounded-full transition-all duration-300" id="nav-pill-2">
+                <i data-lucide="history" class="w-5.5 h-5.5 transition-colors" id="nav-icon-2"></i>
+              </div>
+              <span class="text-[10px] font-bold tracking-wide transition-colors" id="nav-label-2">History</span>
+            </button>
+
+          </nav>
+
+          <!-- Android Bottom Pill Navigation Gesture Indicator -->
+          <div class="h-6 bg-[#161C2A] flex items-center justify-center shrink-0 z-40 relative">
+            <div class="w-32 h-1 bg-white/30 rounded-full"></div>
+          </div>
+
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ==================== IMMERSIVE SCRIPTS & SIMULATOR DATABASE ==================== -->
+    <script>
+      // Initial Family Database
+      const defaultContacts = [
+        { id: '1', name: 'Arjun Kumar', relation: 'Son', phone: '9876543210', color: '#3B82F6' },
+        { id: '2', name: 'Sneha Sharma', relation: 'Daughter', phone: '8765432109', color: '#10B981' }
+      ];
+
+      // Load Contacts or initiate defaults
+      let contacts = JSON.parse(localStorage.getItem('qrpass_contacts')) || defaultContacts;
+      let historyLogs = JSON.parse(localStorage.getItem('qrpass_history')) || [
+        { id: '101', name: 'Arjun Kumar', action: 'QR Sent', detail: 'Sharma Grocery Store • ₹380', time: 'Today, 10:42 PM', icon: 'message-square', color: '#10B981' },
+        { id: '102', name: 'Sneha Sharma', action: 'Called', detail: 'Real Dialler Opened', time: 'Yesterday, 06:15 PM', icon: 'phone', color: '#3B82F6' }
+      ];
+
+      // Current active tab index
+      let currentTabIndex = 0;
+      
+      // Selected relation chip value
+      let selectedRelation = "Son";
+
+      // Selected contact object for action sheets
+      let selectedContact = null;
+
+      // Call screen timer interval
+      let callInterval = null;
+      let callSeconds = 0;
+      let isMuted = false;
+      let isSpeakerOn = false;
+
+      // Active Scan Shop Config
+      let activeShopName = "Sharma Grocery Store";
+      let activeShopPrice = "380";
+
+      // Initializer on window load
+      window.onload = function() {
+        // Render dynamic parts
+        renderContacts();
+        renderHistory();
+        renderRecentContacts();
+        switchTab(0);
+        updateClock();
+        setInterval(updateClock, 1000);
+        
+        // Setup ripple handlers
+        setupGlobalRipples();
+
+        // Boot simulated camera
+        initializeCamera();
+
+        // Parse lucide icons initial render
+        lucide.createIcons();
+      };
+
+      // Real-time Clock Updater
+      function updateClock() {
+        const now = new Date();
+        const hrs = String(now.getHours()).padStart(2, '0');
+        const mins = String(now.getMinutes()).padStart(2, '0');
+        const clockEl = document.getElementById('android-clock');
+        if (clockEl) clockEl.innerText = `${hrs}:${mins}`;
+      }
+
+      // Dynamic System Push Notification System
+      let notifTimer = null;
+      function triggerMockSystemNotification(title, body) {
+        const banner = document.getElementById('system-notification-banner');
+        const titleEl = document.getElementById('sys-notif-title');
+        const bodyEl = document.getElementById('sys-notif-body');
+        
+        if (notifTimer) clearTimeout(notifTimer);
+        
+        titleEl.innerText = title;
+        bodyEl.innerText = body;
+        
+        banner.classList.remove('-translate-y-48');
+        banner.classList.add('translate-y-0');
+
+        // Play an elegant modern soft notification chime if supported
+        try {
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc1 = audioCtx.createOscillator();
+          const osc2 = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          
+          osc1.type = 'sine';
+          osc1.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+          osc1.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1); // E5
+          
+          osc2.type = 'sine';
+          osc2.frequency.setValueAtTime(1046.50, audioCtx.currentTime); // C6
+          
+          gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+          
+          osc1.connect(gain);
+          osc2.connect(gain);
+          gain.connect(audioCtx.destination);
+          
+          osc1.start();
+          osc2.start();
+          osc1.stop(audioCtx.currentTime + 0.35);
+          osc2.stop(audioCtx.currentTime + 0.35);
+        } catch (e) {
+          console.log("Audio not supported or blocked: " + e);
+        }
+
+        notifTimer = setTimeout(() => {
+          banner.classList.remove('translate-y-0');
+          banner.classList.add('-translate-y-48');
+        }, 4000);
+      }
+
+      // TAB NAVIGATION ENGINE
+      function switchTab(index) {
+        currentTabIndex = index;
+        const container = document.getElementById('tab-container');
+        container.style.transform = `translateX(-${index * 33.3333}%)`;
+
+        // Update Nav Pills (Material Design 3 style)
+        for (let i = 0; i < 3; i++) {
+          const pill = document.getElementById(`nav-pill-${i}`);
+          const icon = document.getElementById(`nav-icon-${i}`);
+          const label = document.getElementById(`nav-label-${i}`);
+          const tabButton = document.getElementById(`nav-tab-${i}`);
+
+          if (i === index) {
+            // Active style
+            pill.className = "relative py-1.5 px-6 rounded-full bg-[#3A2E1A] text-[#F5A623] scale-105 transition-all duration-300";
+            icon.className = "w-5.5 h-5.5 text-[#F5A623] stroke-[3.5]";
+            label.className = "text-[11px] font-black tracking-wide text-[#F5A623]";
+          } else {
+            // Muted style
+            pill.className = "relative py-1 px-5 rounded-full bg-transparent text-gray-400 hover:text-white transition-all duration-300";
+            icon.className = "w-5.5 h-5.5 text-gray-400 group-hover:text-white stroke-[2]";
+            label.className = "text-[10px] font-medium tracking-wide text-gray-400 group-hover:text-white";
+          }
+        }
+
+        // Play brief Material notification alert on dynamic action tab change
+        if (index === 1) {
+          triggerMockSystemNotification("Swipe-To-Delete Demo", "Drag any family member's card to the left to delete instantly.");
+        }
+      }
+
+      // CAMERA INTEGRATION & QR DECODING
+      let activeStream = null;
+      let isScanning = true;
+
+      // UPI Link Parser
+      function parseUPILink(link) {
+        if (!link || !link.startsWith("upi://")) return null;
+        
+        const result = { pa: "", pn: "", am: "" };
+        
+        // Extract query string
+        const queryIndex = link.indexOf('?');
+        if (queryIndex === -1) return result;
+        
+        const queryString = link.substring(queryIndex + 1);
+        const pairs = queryString.split('&');
+        
+        for (let i = 0; i < pairs.length; i++) {
+          const pair = pairs[i].split('=');
+          if (pair.length < 1) continue;
+          const key = decodeURIComponent(pair[0]);
+          const value = pair.length > 1 ? decodeURIComponent(pair[1]) : "";
+          
+          if (key === 'pa') result.pa = value;
+          else if (key === 'pn') result.pn = value;
+          else if (key === 'am') result.am = value;
+        }
+        
+        return result;
+      }
+
+      // Handle Decoded QR code
+      function handleDecodedQR(data) {
+        const result = parseUPILink(data);
+        if (result) {
+          isScanning = false; // Pause camera scan
+          
+          activeShopName = result.pn || "UPI Merchant";
+          activeShopPrice = result.am || "380.00"; 
+          
+          // Auto-populate the merchant name and amount fields
+          const devShopNameInput = document.getElementById('dev-shop-name');
+          const devShopPriceInput = document.getElementById('dev-shop-price');
+          if (devShopNameInput) devShopNameInput.value = activeShopName;
+          if (devShopPriceInput) devShopPriceInput.value = parseFloat(activeShopPrice).toFixed(2);
+          
+          // Update Viewfinder UI
+          const vfName = document.getElementById('viewfinder-shop-name');
+          const vfPrice = document.getElementById('viewfinder-shop-price');
+          if (vfName) {
+            vfName.innerText = activeShopName;
+            vfName.title = activeShopName;
+          }
+          if (vfPrice) {
+            vfPrice.innerText = `₹${parseFloat(activeShopPrice).toFixed(2)}`;
+          }
+          
+          // Update status feedback box
+          const statusContainer = document.getElementById('scan-status-container');
+          const statusBadge = document.getElementById('scan-status-badge');
+          const statusText = document.getElementById('scan-status-text');
+          
+          if (statusContainer && statusBadge && statusText) {
+            statusBadge.className = "inline-flex items-center px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider mb-1 bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/30 animate-pulse";
+            statusBadge.innerText = "QR Detected";
+            statusText.innerHTML = `
+              <span class="text-white font-black text-xs block truncate mb-0.5">${activeShopName}</span>
+              <span class="text-[#F5A623] font-black font-mono text-sm">₹${parseFloat(activeShopPrice).toFixed(2)}</span>
+            `;
+            statusContainer.classList.remove('hidden');
+          }
+          
+          // Show resume button (only if camera video stream is indeed active/visible)
+          const video = document.getElementById('viewfinder-video');
+          const resumeBtn = document.getElementById('resume-scan-btn');
+          if (video && !video.classList.contains('hidden') && resumeBtn) {
+            resumeBtn.classList.remove('hidden');
+          }
+          
+          triggerMockSystemNotification("QR Decoded", `Merchant "${activeShopName}" parsed successfully.`);
+        } else {
+          // Decoding was successful but URL format wasn't correct
+          handleDecoderError("Not a payment QR code.");
+        }
+      }
+
+      // Handle decoding/scanning failure messages
+      function handleDecoderError(errorMessage) {
+        const statusContainer = document.getElementById('scan-status-container');
+        const statusBadge = document.getElementById('scan-status-badge');
+        const statusText = document.getElementById('scan-status-text');
+        
+        if (statusContainer && statusBadge && statusText) {
+          statusBadge.className = "inline-flex items-center px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider mb-1 bg-red-900/30 text-red-200 border border-red-500/20";
+          statusBadge.innerText = "Scan Error";
+          statusText.innerText = errorMessage;
+          statusContainer.classList.remove('hidden');
+        }
+        
+        // Brief pulse highlight on placeholder if present
+        const placeholder = document.getElementById('camera-placeholder');
+        if (placeholder) {
+          placeholder.classList.add('border-2', 'border-red-500');
+          setTimeout(() => {
+            placeholder.classList.remove('border-2', 'border-red-500');
+          }, 1500);
+        }
+        
+        triggerMockSystemNotification("Scan Error", errorMessage);
+      }
+
+      // Resume Camera scanning state
+      function resumeScanning() {
+        isScanning = true;
+        const resumeBtn = document.getElementById('resume-scan-btn');
+        if (resumeBtn) resumeBtn.classList.add('hidden');
+        
+        // Hide the feedback box until next code
+        const statusContainer = document.getElementById('scan-status-container');
+        if (statusContainer) statusContainer.classList.add('hidden');
+        
+        clearQRBox();
+      }
+
+      // Draw green box around QR on viewfinder overlay canvas
+      function drawQRBox(location) {
+        const overlay = document.getElementById('viewfinder-overlay');
+        const video = document.getElementById('viewfinder-video');
+        if (!overlay || !video) return;
+        
+        overlay.classList.remove('hidden');
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+        
+        const ctx = overlay.getContext('2d');
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+        
+        ctx.strokeStyle = "#10B981"; // green
+        ctx.lineWidth = 6;
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(location.topLeftCorner.x, location.topLeftCorner.y);
+        ctx.lineTo(location.topRightCorner.x, location.topRightCorner.y);
+        ctx.lineTo(location.bottomRightCorner.x, location.bottomRightCorner.y);
+        ctx.lineTo(location.bottomLeftCorner.x, location.bottomLeftCorner.y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+
+      // Reset the viewfinder box overlay
+      function clearQRBox() {
+        const overlay = document.getElementById('viewfinder-overlay');
+        if (!overlay) return;
+        const ctx = overlay.getContext('2d');
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+        overlay.classList.add('hidden');
+      }
+
+      // Tick animation loop for camera frame capture
+      function tick() {
+        const video = document.getElementById('viewfinder-video');
+        if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
+          const canvas = document.getElementById('qr-canvas');
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            if (isScanning) {
+              const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "dontInvert"
+              });
+              
+              if (code) {
+                drawQRBox(code.location);
+                handleDecodedQR(code.data);
+              } else {
+                clearQRBox();
+              }
+            }
+          }
+        }
+        requestAnimationFrame(tick);
+      }
+
+      // Handle Gallery QR image file loading
+      function handleQRFileUpload(input) {
+        if (!input.files || input.files.length === 0) return;
+        
+        const file = input.files[0];
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+          const img = new Image();
+          img.onload = function() {
+            const canvas = document.getElementById('qr-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = img.width;
+            canvas.height = img.height;
+            
+            ctx.drawImage(img, 0, 0, img.width, img.height);
+            const imageData = ctx.getImageData(0, 0, img.width, img.height);
+            
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            
+            if (code) {
+              handleDecodedQR(code.data);
+            } else {
+              handleDecoderError("Could not read QR — try again in better light.");
+            }
+            
+            // Reset input file value to allow consecutive same-file uploads
+            input.value = '';
+          };
+          
+          img.onerror = function() {
+            handleDecoderError("Could not load image file.");
+            input.value = '';
+          };
+          
+          img.src = e.target.result;
+        };
+        
+        reader.readAsDataURL(file);
+      }
+
+      // Active Camera stream bootstrap
+      async function initializeCamera() {
+        const video = document.getElementById('viewfinder-video');
+        const placeholder = document.getElementById('camera-placeholder');
+        
+        try {
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'environment' }
+            });
+            activeStream = stream;
+            video.srcObject = stream;
+            video.classList.remove('hidden');
+            placeholder.classList.add('hidden');
+            
+            // Play video and start frame capture tick on metadata loaded
+            video.onloadedmetadata = () => {
+              video.play();
+              isScanning = true;
+              requestAnimationFrame(tick);
+            };
+            console.log("Device camera stream initiated successfully.");
+          }
+        } catch (e) {
+          console.log("Using dynamic camera scanner illustration since hardware/permissions are blocked.");
+          if (video) video.classList.add('hidden');
+          if (placeholder) placeholder.classList.remove('hidden');
+        }
+      }
+
+      // CONSOLE UPDATER FROM DEV PANEL
+      function updateSimulatorQR() {
+        const nameInput = document.getElementById('dev-shop-name').value.trim();
+        const priceInput = document.getElementById('dev-shop-price').value.trim();
+
+        if (!nameInput || !priceInput) return;
+
+        activeShopName = nameInput;
+        activeShopPrice = priceInput;
+
+        // Render on UI Viewfinder
+        document.getElementById('viewfinder-shop-name').innerText = nameInput;
+        document.getElementById('viewfinder-shop-name').title = nameInput;
+        
+        // Format price safely
+        const formattedPrice = parseFloat(priceInput).toFixed(2);
+        document.getElementById('viewfinder-shop-price').innerText = `₹${formattedPrice}`;
+
+        triggerMockSystemNotification("UPI Code Synced", `Viewfinder updated with "${nameInput}" for ₹${formattedPrice}.`);
+      }
+
+      // RENDER HOME RECENT AVATARS
+      function renderRecentContacts() {
+        const container = document.getElementById('home-recent-contacts');
+        container.innerHTML = '';
+
+        if (contacts.length === 0) {
+          container.innerHTML = `
+            <div class="py-2 text-center w-full">
+              <p class="text-[10px] text-gray-500 font-bold uppercase">No family links yet</p>
+              <button onclick="switchTab(1)" class="text-[10px] text-[#F5A623] font-bold underline mt-1 block mx-auto">Create list</button>
+            </div>
+          `;
+          return;
+        }
+
+        contacts.forEach(contact => {
+          const avatarLetter = contact.name.trim().charAt(0);
+          
+          const div = document.createElement('div');
+          div.className = "flex flex-col items-center gap-1.5 shrink-0 select-none cursor-pointer group";
+          div.onclick = () => openParentActionSheet(contact);
+          div.innerHTML = `
+            <div class="relative">
+              <div class="w-14 h-14 rounded-full text-black font-black flex items-center justify-center text-lg shadow-md border-2 border-[#F5A623]/30 group-hover:border-[#F5A623] group-hover:scale-105 transition-all relative" style="background-color: ${contact.color || '#F5A623'}">
+                ${avatarLetter}
+                <!-- Tap helper pulse dot -->
+                <span class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-[#10B981] rounded-full border-2 border-[#0D1117] flex items-center justify-center">
+                  <span class="w-1.5 h-1.5 bg-white rounded-full animate-ping"></span>
+                </span>
+              </div>
+            </div>
+            <span class="text-[11px] font-bold text-gray-300 group-hover:text-white truncate max-w-[65px] text-center">${contact.name.split(' ')[0]}</span>
+          `;
+          container.appendChild(div);
+        });
+      }
+
+      // RENDER DYNAMIC CONTACTS
+      function renderContacts() {
+        const container = document.getElementById('contacts-list-container');
+        container.innerHTML = '';
+
+        // Status counts
+        const counter = document.getElementById('contacts-badge-counter');
+        const statusDot = document.getElementById('contacts-status-dot');
+        counter.innerText = `${contacts.length}/6`;
+        
+        if (contacts.length >= 6) {
+          statusDot.className = "w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse";
+        } else {
+          statusDot.className = "w-1.5 h-1.5 rounded-full bg-[#F5A623]";
+        }
+
+        if (contacts.length === 0) {
+          container.innerHTML = `
+            <div class="py-12 text-center space-y-3">
+              <div class="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center mx-auto text-gray-500 border border-white/5">
+                <i data-lucide="users-2" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <p class="text-xs font-bold text-white">No Family Contacts Added</p>
+                <p class="text-[10px] text-gray-500 max-w-[220px] mx-auto mt-1">Tap the plus button below to link children or carers' WhatsApp numbers.</p>
+              </div>
+            </div>
+          `;
+          lucide.createIcons();
+          return;
+        }
+
+        contacts.forEach((contact, idx) => {
+          const avatarLetter = contact.name.trim().charAt(0);
+          
+          // Outer row container (relative, overflow hidden, red background for swipe gesture)
+          const row = document.createElement('div');
+          row.className = "relative rounded-2xl overflow-hidden bg-red-600 border border-white/5 select-none touch-none transform transition-transform duration-100 max-h-[120px]";
+          row.id = `contact-row-${contact.id}`;
+
+          // Underlay trash icon
+          const trashUnderlay = document.createElement('div');
+          trashUnderlay.className = "absolute inset-0 bg-gradient-to-r from-red-600 to-red-700 flex items-center justify-end px-6 text-white gap-2 font-bold text-xs";
+          trashUnderlay.innerHTML = `
+            <div class="flex items-center gap-1.5 animate-bounce">
+              <i data-lucide="trash-2" class="w-4.5 h-4.5"></i>
+              <span>Dismiss</span>
+            </div>
+          `;
+          row.appendChild(trashUnderlay);
+
+          // Swipeable surface
+          const card = document.createElement('div');
+          card.className = "bg-[#161C2A] p-3.5 rounded-2xl flex items-center justify-between gap-3 relative z-10 transition-transform duration-200 cursor-grab active:cursor-grabbing";
+          card.id = `contact-card-${contact.id}`;
+
+          // Format number for preview
+          const formattedPhone = contact.phone.startsWith('+') ? contact.phone : `+91 ${contact.phone.replace(/(\d{5})(\d{5})/, '$1 $2')}`;
+
+          card.innerHTML = `
+            <div class="flex items-center gap-3 min-w-0">
+              <!-- Colored Avatar -->
+              <div class="w-11 h-11 rounded-full text-black font-black flex items-center justify-center shrink-0 uppercase text-sm" style="background-color: ${contact.color || '#3B82F6'}">
+                ${avatarLetter}
+              </div>
+              <div class="text-left min-w-0">
+                <h4 class="text-xs font-black text-white leading-tight truncate">${contact.name}</h4>
+                <p class="text-[10px] text-[#9EAFCE] font-bold mt-0.5">${contact.relation}</p>
+                <p class="text-[9px] text-gray-500 font-medium font-mono">${formattedPhone}</p>
+              </div>
+            </div>
+
+            <!-- Direct Outbound Action Links on the right -->
+            <div class="flex items-center gap-2 shrink-0">
+              <!-- WhatsApp deep link -->
+              <a href="https://wa.me/91${contact.phone.replace(/\D/g, '')}?text=Amma%20sent%20you%20this%20QR%20code%20from%20the%20shop%20%E2%80%94%20please%20scan%20and%20pay%20for%20her." target="_blank" onclick="logOutboundAction('${contact.id}', 'QR Sent')" class="w-9 h-9 rounded-xl bg-[#10B981]/15 border border-[#10B981]/25 hover:bg-[#10B981] hover:text-white text-[#10B981] flex items-center justify-center transition-all tooltip-box" data-tooltip="WhatsApp Direct">
+                <i data-lucide="message-square" class="w-4 h-4 stroke-[2.5]"></i>
+              </a>
+              <!-- Native tel dialler link -->
+              <a href="tel:+91${contact.phone.replace(/\D/g, '')}" onclick="logOutboundAction('${contact.id}', 'Called')" class="w-9 h-9 rounded-xl bg-[#3B82F6]/15 border border-[#3B82F6]/25 hover:bg-[#3B82F6] hover:text-white text-[#3B82F6] flex items-center justify-center transition-all tooltip-box" data-tooltip="Device Dialler">
+                <i data-lucide="phone" class="w-4 h-4 stroke-[2.5]"></i>
+              </a>
+            </div>
+          `;
+          row.appendChild(card);
+
+          // Add to container
+          container.appendChild(row);
+
+          // Initialize Swipe physics
+          initSwipeGesture(row, card, contact.id, contact.name);
+        });
+
+        lucide.createIcons();
+      }
+
+      // DYNAMIC HISTORY LOGGER
+      function renderHistory() {
+        const container = document.getElementById('history-logs-container');
+        container.innerHTML = '';
+
+        if (historyLogs.length === 0) {
+          container.innerHTML = `
+            <div class="py-12 text-center space-y-3">
+              <div class="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center mx-auto text-gray-500 border border-white/5">
+                <i data-lucide="info" class="w-6 h-6"></i>
+              </div>
+              <p class="text-xs font-bold text-white">No Payment History Logs</p>
+              <p class="text-[10px] text-gray-500 max-w-[220px] mx-auto mt-1">Actions taken via WhatsApp or direct calling will show here dynamically.</p>
+            </div>
+          `;
+          lucide.createIcons();
+          return;
+        }
+
+        historyLogs.forEach(log => {
+          const isWhatsApp = log.action === 'QR Sent';
+          const iconName = isWhatsApp ? 'message-square' : 'phone';
+          const badgeColor = isWhatsApp ? 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/20' : 'bg-[#3B82F6]/15 text-[#3B82F6] border-[#3B82F6]/20';
+          
+          const div = document.createElement('div');
+          div.className = "bg-[#161C2A] p-3.5 rounded-2xl border border-white/5 flex items-start gap-3 text-left animate-slide-up relative";
+          div.innerHTML = `
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style="background-color: ${log.color || '#3B82F6'}">
+              <span class="font-black text-black text-sm uppercase">${log.name.charAt(0)}</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between gap-1">
+                <h4 class="text-xs font-black text-white leading-tight truncate">${log.name}</h4>
+                <span class="text-[8px] font-bold px-2 py-0.5 rounded-full border ${badgeColor} shrink-0 uppercase tracking-wider">${log.action}</span>
+              </div>
+              <p class="text-[10px] text-[#9EAFCE] mt-1 font-medium">${log.detail}</p>
+              <p class="text-[8px] text-gray-500 font-mono mt-1">${log.time}</p>
+            </div>
+          `;
+          container.appendChild(div);
+        });
+
+        lucide.createIcons();
+      }
+
+      // OUTBOUND LOGGER TRIGGERS (Triggered when user clicks buttons)
+      function logOutboundAction(contactId, actionType) {
+        const contact = contacts.find(c => c.id === contactId);
+        if (!contact) return;
+
+        const date = new Date();
+        const hrs = String(date.getHours()).padStart(2, '0');
+        const mins = String(date.getMinutes()).padStart(2, '0');
+        const timeStr = `Today, ${hrs}:${mins} PM`;
+
+        const newLog = {
+          id: String(Date.now()),
+          name: contact.name,
+          action: actionType,
+          detail: actionType === 'QR Sent' ? `${activeShopName} • ₹${parseFloat(activeShopPrice).toFixed(2)}` : 'Real Phone Dialler opened',
+          time: timeStr,
+          icon: actionType === 'QR Sent' ? 'message-square' : 'phone',
+          color: contact.color
+        };
+
+        // Append to local database
+        historyLogs.unshift(newLog);
+        localStorage.setItem('qrpass_history', JSON.stringify(historyLogs));
+        renderHistory();
+
+        // System broadcast notification
+        if (actionType === 'QR Sent') {
+          triggerMockSystemNotification(
+            "WhatsApp Transmit", 
+            `Dispatched shop QR payload directly to ${contact.name.split(' ')[0]}.`
+          );
+        } else {
+          // Open immersive call simulator overlay
+          openImmersiveCallScreen(contact);
+        }
+      }
+
+      // PHONE ACTION PICKER BOTTOM SHEET
+      function openParentActionSheet(contact) {
+        selectedContact = contact;
+
+        const avatar = document.getElementById('action-sheet-avatar');
+        const name = document.getElementById('action-sheet-name');
+        const relation = document.getElementById('action-sheet-relation');
+        const shop = document.getElementById('action-preview-shop');
+        const price = document.getElementById('action-preview-price');
+
+        const firstLetter = contact.name.trim().charAt(0);
+        avatar.innerText = firstLetter;
+        avatar.style.backgroundColor = contact.color || '#3B82F6';
+        name.innerText = contact.name;
+        relation.innerText = `${contact.relation} • +91 ${contact.phone}`;
+
+        shop.innerText = activeShopName;
+        price.innerText = `₹${parseFloat(activeShopPrice).toFixed(2)}`;
+
+        // Dynamic deep URL binding for buttons
+        const waBtn = document.getElementById('action-whatsapp-btn');
+        const callBtn = document.getElementById('action-call-btn');
+
+        waBtn.onclick = () => {
+          closeParentActionSheet();
+          // Open the actual deep link
+          const cleanNo = contact.phone.replace(/\D/g, '');
+          const msg = `Amma sent you this QR from the shop — please scan and pay for her.`;
+          const url = `https://wa.me/91${cleanNo}?text=${encodeURIComponent(msg)}`;
+          window.open(url, '_blank');
+          logOutboundAction(contact.id, 'QR Sent');
+        };
+
+        callBtn.onclick = () => {
+          closeParentActionSheet();
+          // Trigger mock call screen & deep link
+          const cleanNo = contact.phone.replace(/\D/g, '');
+          window.location.href = `tel:+91${cleanNo}`;
+          logOutboundAction(contact.id, 'Called');
+        };
+
+        // Slide up action sheet
+        const sheet = document.getElementById('parent-action-sheet');
+        sheet.classList.remove('translate-y-full', 'opacity-0', 'pointer-events-none');
+        sheet.classList.add('translate-y-0', 'opacity-100');
+      }
+
+      function closeParentActionSheet() {
+        const sheet = document.getElementById('parent-action-sheet');
+        sheet.classList.remove('translate-y-0', 'opacity-100');
+        sheet.classList.add('translate-y-full', 'opacity-0', 'pointer-events-none');
+      }
+
+      // ADD CONTACT BOTTOM SHEET
+      function openAddContactSheet() {
+        const sheet = document.getElementById('add-contact-sheet');
+        const warning = document.getElementById('contact-limit-warning');
+
+        // Reset fields
+        document.getElementById('form-contact-name').value = '';
+        document.getElementById('form-contact-phone').value = '';
+        selectRelationChip('Son');
+
+        if (contacts.length >= 6) {
+          warning.classList.remove('hidden');
+          // Hide save form action button partially or alert
+        } else {
+          warning.classList.add('hidden');
+        }
+
+        sheet.classList.remove('translate-y-full', 'opacity-0', 'pointer-events-none');
+        sheet.classList.add('translate-y-0', 'opacity-100');
+      }
+
+      function closeAddContactSheet() {
+        const sheet = document.getElementById('add-contact-sheet');
+        sheet.classList.remove('translate-y-0', 'opacity-100');
+        sheet.classList.add('translate-y-full', 'opacity-0', 'pointer-events-none');
+      }
+
+      function selectRelationChip(relationName) {
+        selectedRelation = relationName;
+        document.getElementById('form-contact-relation').value = relationName;
+
+        // Visual highlights update
+        const chips = document.querySelectorAll('.relation-chip');
+        chips.forEach(chip => {
+          if (chip.innerText.trim() === relationName) {
+            chip.className = "relation-chip py-2 bg-[#3A2E1A] border border-[#F5A623] text-[#F5A623] text-[10px] font-bold rounded-xl text-center active:scale-95 transition-all";
+          } else {
+            chip.className = "relation-chip py-2 bg-[#0D1117] border border-white/5 text-gray-400 text-[10px] font-bold rounded-xl text-center active:scale-95 transition-all";
+          }
+        });
+      }
+
+      function handleSaveContact(e) {
+        e.preventDefault();
+
+        if (contacts.length >= 6) {
+          triggerMockSystemNotification("Circle Overloaded", "Maximum 6 family members are allowed. Swipe a contact left to delete.");
+          closeAddContactSheet();
+          return;
+        }
+
+        const nameInput = document.getElementById('form-contact-name').value.trim();
+        const phoneInput = document.getElementById('form-contact-phone').value.trim().replace(/\s/g, '');
+
+        // Validation
+        if (!nameInput) {
+          triggerMockSystemNotification("Field Error", "Contact Name is mandatory.");
+          return;
+        }
+
+        // Validate phone
+        if (phoneInput.length !== 10 || isNaN(phoneInput)) {
+          triggerMockSystemNotification("Phone Format Error", "Please provide a valid 10-digit mobile number.");
+          return;
+        }
+
+        // Distinct Material Avatar colors
+        const colors = ['#3B82F6', '#10B981', '#F5A623', '#EC4899', '#8B5CF6', '#F43F5E'];
+        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+        const newContact = {
+          id: String(Date.now()),
+          name: nameInput,
+          relation: selectedRelation,
+          phone: phoneInput,
+          color: randomColor
+        };
+
+        // Push to active state
+        contacts.push(newContact);
+        localStorage.setItem('qrpass_contacts', JSON.stringify(contacts));
+
+        // Re-render
+        renderContacts();
+        renderRecentContacts();
+
+        // Close Bottom Sheet
+        closeAddContactSheet();
+
+        // System notification with scale-in highlights
+        triggerMockSystemNotification("Family Linked", `${nameInput} (${selectedRelation}) has been registered securely.`);
+
+        // Apply scale in visual highlight to the newly added row
+        setTimeout(() => {
+          const newRow = document.getElementById(`contact-row-${newContact.id}`);
+          if (newRow) {
+            newRow.classList.add('scale-105', 'border-[#F5A623]', 'transition-all', 'duration-300');
+            setTimeout(() => {
+              newRow.classList.remove('scale-105', 'border-[#F5A623]');
+            }, 8000);
+          }
+        }, 100);
+      }
+
+      // DYNAMIC SWIPE-TO-DELETE SYSTEM (TOUCH & MOUSE DRAGGING)
+      function initSwipeGesture(rowElement, cardElement, contactId, name) {
+        let startX = 0;
+        let currentX = 0;
+        let isDragging = false;
+        const threshold = -110; // Drag pixel threshold to trigger deletion
+
+        // Touch Listeners
+        cardElement.addEventListener('touchstart', (e) => {
+          startX = e.touches[0].clientX;
+          isDragging = true;
+          cardElement.style.transition = 'none';
+        }, { passive: true });
+
+        cardElement.addEventListener('touchmove', (e) => {
+          if (!isDragging) return;
+          currentX = e.touches[0].clientX - startX;
+          
+          // Only allow swiping to the left
+          if (currentX > 0) currentX = 0;
+          
+          // Apply rubber-banding limit on deep drag
+          if (currentX < -180) {
+            currentX = -180 + (currentX + 180) * 0.25;
+          }
+
+          cardElement.style.transform = `translateX(${currentX}px)`;
+        }, { passive: true });
+
+        cardElement.addEventListener('touchend', (e) => {
+          if (!isDragging) return;
+          isDragging = false;
+          executeSwipeRelease();
+        });
+
+        // Mouse Drag Listeners
+        cardElement.addEventListener('mousedown', (e) => {
+          startX = e.clientX;
+          isDragging = true;
+          cardElement.style.transition = 'none';
+          e.preventDefault(); // Prevent text selection
+        });
+
+        window.addEventListener('mousemove', (e) => {
+          if (!isDragging) return;
+          currentX = e.clientX - startX;
+          
+          if (currentX > 0) currentX = 0;
+          if (currentX < -180) {
+            currentX = -180 + (currentX + 180) * 0.25;
+          }
+
+          cardElement.style.transform = `translateX(${currentX}px)`;
+        });
+
+        window.addEventListener('mouseup', () => {
+          if (!isDragging) return;
+          isDragging = false;
+          executeSwipeRelease();
+        });
+
+        function executeSwipeRelease() {
+          cardElement.style.transition = 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+          
+          if (currentX < threshold) {
+            // Trigger dismissal
+            cardElement.style.transform = 'translateX(-120%)';
+            
+            // Execute height collapse animation after slide off
+            setTimeout(() => {
+              rowElement.classList.add('card-collapsing');
+              rowElement.style.maxHeight = '0px';
+              rowElement.style.padding = '0px';
+              rowElement.style.marginTop = '0px';
+              rowElement.style.marginBottom = '0px';
+              rowElement.style.opacity = '0';
+              rowElement.style.borderWidth = '0px';
+
+              // Remove from list and save
+              setTimeout(() => {
+                contacts = contacts.filter(c => c.id !== contactId);
+                localStorage.setItem('qrpass_contacts', JSON.stringify(contacts));
+                renderContacts();
+                renderRecentContacts();
+                triggerMockSystemNotification("Contact Cleared", `Removed ${name} from Family Circle.`);
+              }, 300);
+
+            }, 200);
+
+          } else {
+            // Snapback smoothly
+            cardElement.style.transform = 'translateX(0px)';
+          }
+          currentX = 0;
+        }
+      }
+
+      // IMMERSIVE CALL DIALER MODAL
+      function openImmersiveCallScreen(contact) {
+        const callScreen = document.getElementById('immersive-call-screen');
+        const cName = document.getElementById('call-screen-name');
+        const cRelation = document.getElementById('call-screen-relation');
+        const cAvatar = document.getElementById('call-screen-avatar');
+        
+        cName.innerText = contact.name;
+        cRelation.innerText = `${contact.relation} • +91 ${contact.phone}`;
+        cAvatar.innerText = contact.name.trim().charAt(0);
+        cAvatar.style.backgroundColor = contact.color || '#3B82F6';
+
+        // Reset call variables
+        callSeconds = 0;
+        isMuted = false;
+        isSpeakerOn = false;
+        document.getElementById('call-screen-timer').innerText = "00:00";
+        updateCallControlsStyle();
+
+        // Slide/Scale in call interface
+        callScreen.classList.remove('scale-110', 'opacity-0', 'pointer-events-none');
+        callScreen.classList.add('scale-100', 'opacity-100');
+
+        // Start Call timer
+        if (callInterval) clearInterval(callInterval);
+        callInterval = setInterval(() => {
+          callSeconds++;
+          const mins = String(Math.floor(callSeconds / 60)).padStart(2, '0');
+          const secs = String(callSeconds % 60).padStart(2, '0');
+          document.getElementById('call-screen-timer').innerText = `${mins}:${secs}`;
+        }, 1000);
+      }
+
+      function hangUpCall() {
+        const callScreen = document.getElementById('immersive-call-screen');
+        
+        // Stop timer
+        if (callInterval) clearInterval(callInterval);
+        
+        // Animate call screen out
+        callScreen.classList.remove('scale-100', 'opacity-100');
+        callScreen.classList.add('scale-110', 'opacity-0', 'pointer-events-none');
+
+        triggerMockSystemNotification("Call Terminated", `Hotline session completed (${callSeconds}s duration).`);
+      }
+
+      function toggleCallMute() {
+        isMuted = !isMuted;
+        updateCallControlsStyle();
+        triggerMockSystemNotification(isMuted ? "Microphone Muted" : "Microphone Active", "Simulated transmission muted state changed.");
+      }
+
+      function toggleCallSpeaker() {
+        isSpeakerOn = !isSpeakerOn;
+        updateCallControlsStyle();
+        triggerMockSystemNotification(isSpeakerOn ? "Speakerphone Active" : "Handset Speaker Mode", "Audio transmission routing modified.");
+      }
+
+      function updateCallControlsStyle() {
+        const muteBtn = document.getElementById('call-mute-btn');
+        const muteIcon = document.getElementById('call-mute-icon');
+        const speakerBtn = document.getElementById('call-speaker-btn');
+        const speakerIcon = document.getElementById('call-speaker-icon');
+
+        if (isMuted) {
+          muteBtn.className = "w-12 h-12 rounded-full bg-[#EC4899] text-[#0D1117] flex items-center justify-center transition-colors focus:outline-none";
+          muteIcon.className = "w-4.5 h-4.5 stroke-[3]";
+        } else {
+          muteBtn.className = "w-12 h-12 rounded-full bg-white/5 border border-white/10 text-white flex items-center justify-center hover:bg-white/10 transition-colors focus:outline-none";
+          muteIcon.className = "w-4.5 h-4.5 stroke-[2]";
+        }
+
+        if (isSpeakerOn) {
+          speakerBtn.className = "w-12 h-12 rounded-full bg-[#3B82F6] text-[#0D1117] flex items-center justify-center transition-colors focus:outline-none";
+          speakerIcon.className = "w-4.5 h-4.5 stroke-[3]";
+        } else {
+          speakerBtn.className = "w-12 h-12 rounded-full bg-white/5 border border-white/10 text-white flex items-center justify-center hover:bg-white/10 transition-colors focus:outline-none";
+          speakerIcon.className = "w-4.5 h-4.5 stroke-[2]";
+        }
+      }
+
+      // IMMERSIVE BUTTON CLICK RIPPLE SCRIPT
+      function setupGlobalRipples() {
+        document.body.addEventListener('click', function(e) {
+          const target = e.target.closest('.ripple-effect, button, nav button, a');
+          if (!target) return;
+
+          // Create wave ripple
+          const ripple = document.createElement('span');
+          ripple.classList.add('ripple');
+          
+          const rect = target.getBoundingClientRect();
+          const size = Math.max(rect.width, rect.height);
+          ripple.style.width = ripple.style.height = `${size}px`;
+          
+          const x = e.clientX - rect.left - size / 2;
+          const y = e.clientY - rect.top - size / 2;
+          ripple.style.left = `${x}px`;
+          ripple.style.top = `${y}px`;
+          
+          target.style.position = 'relative';
+          target.style.overflow = 'hidden';
+          target.appendChild(ripple);
+          
+          ripple.addEventListener('animationend', () => {
+            ripple.remove();
+          });
+        });
+      }
+
+      // CLEAR ACTIVE LOGS
+      function clearHistoryLogs() {
+        historyLogs = [];
+        localStorage.setItem('qrpass_history', JSON.stringify(historyLogs));
+        renderHistory();
+        triggerMockSystemNotification("Audit Logs Purged", "All historical payments and phone entries are wiped clean.");
+      }
+
+      // CLOSES ALL INTERACTIVE BOTTOM SHEETS ON BACKDROP CLICKS
+      window.addEventListener('click', function(e) {
+        const parentSheet = document.getElementById('parent-action-sheet');
+        const addSheet = document.getElementById('add-contact-sheet');
+        
+        // If user clicks outside the modal sheets and sheets are open
+        if (e.target === parentSheet) {
+          closeParentActionSheet();
+        }
+        if (e.target === addSheet) {
+          closeAddContactSheet();
+        }
+      });
+    </script>
+
+  </body>
+</html>

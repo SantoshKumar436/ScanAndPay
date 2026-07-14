@@ -1,0 +1,6 @@
+{
+  "name": "QRPass Android Simulator",
+  "description": "An interactive Material Design 3 simulated Android application for QRPass, helping elderly parents in India photograph shop UPI QR codes and easily send them to family or call them directly.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
